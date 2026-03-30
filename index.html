@@ -3,43 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Privacy Motion Shield</title>
+    <title>Distance-Aware Privacy Shield</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+        video { width: 100vw; height: 100vh; object-fit: cover; }
         
-        /* The Video Feed */
-        #video { width: 100vw; height: 100vh; object-fit: cover; }
-
-        /* The Whiteout Overlay */
         #whiteout {
             position: fixed;
             top: 0; left: 0;
             width: 100vw; height: 100vh;
             background: white;
-            display: none; /* Hidden until motion detected */
+            display: none;
             z-index: 1000;
             justify-content: center;
             align-items: center;
         }
 
-        /* The Reset Button (The X) */
         #close-btn {
             position: absolute;
             top: 20px; right: 20px;
-            font-size: 40px; font-weight: bold;
-            color: #333; cursor: pointer;
-            border: 3px solid #333;
-            width: 60px; height: 60px;
+            font-size: 30px; font-weight: bold;
+            color: #444; cursor: pointer;
+            border: 2px solid #444;
+            width: 50px; height: 50px;
             display: flex; justify-content: center; align-items: center;
             border-radius: 50%;
         }
 
-        /* Initial Start Overlay */
         #setup-overlay {
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9);
+            background: #111;
             color: white;
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
@@ -47,8 +42,14 @@
         }
 
         button {
-            padding: 15px 30px; font-size: 18px; cursor: pointer;
-            background: #27ae60; color: white; border: none; border-radius: 5px;
+            padding: 20px 40px; font-size: 18px; cursor: pointer;
+            background: #e67e22; color: white; border: none; border-radius: 5px;
+            font-weight: bold;
+        }
+
+        #debug {
+            position: fixed; bottom: 10px; left: 10px; color: lime; 
+            font-family: monospace; font-size: 12px; pointer-events: none;
         }
 
         canvas { display: none; }
@@ -57,17 +58,17 @@
 <body>
 
     <div id="setup-overlay">
-        <h1>Motion Privacy Shield</h1>
-        <p>Click the button to enable the camera and motion detection.</p>
-        <button onclick="startApp()">Start Shield</button>
+        <button onclick="startApp()">ACTIVATE DISTANCE SENSOR</button>
+        <p style="margin-top:15px; color:#888;">Ignores close-up movement. Triggers on distant movement.</p>
     </div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
+    <div id="debug">Motion: 0%</div>
 
     <div id="whiteout">
         <div id="close-btn" onclick="resetShield()">X</div>
-        <h2 style="color: #666;">SCREEN PROTECTED</h2>
+        <h1 style="color: #ddd;">遠 (DISTANCE TRIGGER)</h1>
     </div>
 
     <script>
@@ -75,10 +76,11 @@
         const canvas = document.getElementById('canvas');
         const whiteout = document.getElementById('whiteout');
         const setupOverlay = document.getElementById('setup-overlay');
+        const debug = document.getElementById('debug');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        let lastFrameData = null;
-        let isActive = false;
+        let frameBuffer = [];
+        const BUFFER_SIZE = 12; // Temporal lag to catch slow distant movement
         let isWhitedOut = false;
 
         async function startApp() {
@@ -86,49 +88,50 @@
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
                 setupOverlay.style.display = 'none';
-                isActive = true;
-                
-                // Start the detection loop
                 video.onloadedmetadata = () => {
                     video.play();
-                    checkMotion();
+                    detectLoop();
                 };
             } catch (err) {
-                alert("Camera access was denied. Please check your browser settings.");
+                alert("Camera access required.");
             }
         }
 
-        function checkMotion() {
-            if (!isActive || isWhitedOut) return;
+        function detectLoop() {
+            if (isWhitedOut) return;
 
-            // Use a tiny canvas to compare pixels (faster)
             canvas.width = 64;
             canvas.height = 48;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
             const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = currentFrame.data;
 
-            if (lastFrameData) {
-                let diff = 0;
-                for (let i = 0; i < data.length; i += 4) {
-                    // Compare brightness of current pixel vs last pixel
-                    const oldBrightness = (lastFrameData[i] + lastFrameData[i+1] + lastFrameData[i+2]) / 3;
-                    const newBrightness = (data[i] + data[i+1] + data[i+2]) / 3;
+            if (frameBuffer.length >= BUFFER_SIZE) {
+                const oldFrame = frameBuffer[0];
+                let motionCount = 0;
+
+                for (let i = 0; i < currentFrame.data.length; i += 4) {
+                    const diff = Math.abs(currentFrame.data[i] - oldFrame.data[i]) +
+                                 Math.abs(currentFrame.data[i+1] - oldFrame.data[i+1]) +
+                                 Math.abs(currentFrame.data[i+2] - oldFrame.data[i+2]);
                     
-                    if (Math.abs(oldBrightness - newBrightness) > 40) {
-                        diff++;
-                    }
+                    if (diff > 90) motionCount++;
                 }
 
-                // If more than 5% of the screen changed, white it out
-                if (diff > (canvas.width * canvas.height * 0.05)) {
+                const motionPercent = (motionCount / (canvas.width * canvas.height));
+                debug.innerText = `Motion: ${(motionPercent * 100).toFixed(1)}%`;
+
+                // --- DISTANCE LOGIC ---
+                // If motion is > 0.8% (someone far away moving)
+                // AND motion is < 12% (not you sitting right in front of it)
+                if (motionPercent > 0.008 && motionPercent < 0.12) {
                     triggerWhiteout();
                 }
+
+                frameBuffer.shift();
             }
 
-            lastFrameData = data;
-            requestAnimationFrame(checkMotion);
+            frameBuffer.push(currentFrame);
+            requestAnimationFrame(detectLoop);
         }
 
         function triggerWhiteout() {
@@ -139,8 +142,8 @@
         function resetShield() {
             isWhitedOut = false;
             whiteout.style.display = 'none';
-            lastFrameData = null; // Clear history to avoid immediate re-trigger
-            checkMotion();
+            frameBuffer = [];
+            detectLoop();
         }
     </script>
 </body>
