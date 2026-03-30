@@ -3,90 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Motion Privacy Screen</title>
+    <title>Motion Privacy Shield</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        video { width: 100vw; height: 100vh; object-fit: cover; }
-        
+        /* Reset and Full Screen Setup */
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            width: 100%; 
+            height: 100%; 
+            overflow: hidden; 
+            background: #000; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* The Live Camera Feed */
+        video { 
+            width: 100vw; 
+            height: 100vh; 
+            object-fit: cover; 
+            transform: scaleX(-1); /* Mirror mode for natural movement */
+        }
+
+        /* The Whiteout Overlay */
         #whiteout {
             position: fixed;
-            top: 0; left: 0;
-            width: 100vw; height: 100vh;
+            top: 0; 
+            left: 0;
+            width: 100vw; 
+            height: 100vh;
             background: white;
-            display: none;
+            display: none; /* Hidden by default */
             z-index: 9999;
             justify-content: center;
             align-items: center;
         }
 
+        /* The Reset Button */
         #close-btn {
             position: absolute;
-            top: 20px;
-            right: 20px;
-            font-size: 40px;
+            top: 30px;
+            right: 30px;
+            font-size: 32px;
             cursor: pointer;
-            color: #333;
+            color: #1a1a1a;
             font-weight: bold;
-            border: 2px solid #333;
-            padding: 5px 15px;
-            border-radius: 10px;
+            border: 3px solid #1a1a1a;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+            user-select: none;
         }
 
+        #close-btn:hover {
+            background: #f0f0f0;
+        }
+
+        /* Hidden helper canvas for processing frames */
         canvas { display: none; }
+
+        /* Status indicator for setup */
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255,255,255,0.5);
+            font-size: 12px;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
 
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
 
     <div id="whiteout">
         <div id="close-btn" onclick="resetScreen()">X</div>
+        <h1 style="color: #ccc; font-weight: 200;">Privacy Mode Active</h1>
     </div>
+
+    <div id="status">System: Waiting for Camera...</div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const whiteout = document.getElementById('whiteout');
+        const status = document.getElementById('status');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         
         let lastFrame = null;
         let isTriggered = false;
 
-        // Start Camera
+        // 1. Request Camera Access
         async function initCamera() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 1280, height: 720 } 
+                });
                 video.srcObject = stream;
-                requestAnimationFrame(detectMotion);
+                status.innerText = "System: Monitoring for Motion...";
+                
+                // Start processing loop once video metadata is loaded
+                video.onloadedmetadata = () => {
+                    requestAnimationFrame(detectMotion);
+                };
             } catch (err) {
-                alert("Camera access denied or not available.");
+                console.error(err);
+                status.innerText = "Error: Camera access denied.";
+                alert("Please allow camera access for the privacy shield to work.");
             }
         }
 
+        // 2. The Motion Detection Engine
         function detectMotion() {
-            if (isTriggered) return;
+            if (isTriggered) return; // Stop checking if already whited out
 
-            // Set canvas size to match video
-            canvas.width = video.videoWidth / 4; // Downscale for performance
-            canvas.height = video.videoHeight / 4;
+            // Use a tiny canvas for performance (64x48 is plenty for motion)
+            canvas.width = 64;
+            canvas.height = 48;
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
             if (lastFrame) {
-                let diff = 0;
+                let changedPixels = 0;
+                const threshold = 80; // Sensitivity to color change per pixel
+
                 for (let i = 0; i < currentFrame.data.length; i += 4) {
-                    // Compare RGB values
                     const rDiff = Math.abs(currentFrame.data[i] - lastFrame.data[i]);
                     const gDiff = Math.abs(currentFrame.data[i+1] - lastFrame.data[i+1]);
                     const bDiff = Math.abs(currentFrame.data[i+2] - lastFrame.data[i+2]);
                     
-                    if (rDiff + gDiff + bDiff > 100) diff++;
+                    if (rDiff + gDiff + bDiff > threshold) {
+                        changedPixels++;
+                    }
                 }
 
-                // Threshold: If more than 5% of pixels changed
-                if (diff > (canvas.width * canvas.height) * 0.05) {
+                // If more than 3% of the image changed, trigger the shield
+                const motionPercentage = (changedPixels / (canvas.width * canvas.height));
+                if (motionPercentage > 0.03) {
                     triggerWhiteout();
                 }
             }
@@ -95,18 +154,22 @@
             requestAnimationFrame(detectMotion);
         }
 
+        // 3. UI Actions
         function triggerWhiteout() {
             isTriggered = true;
             whiteout.style.display = 'flex';
+            status.innerText = "System: MOTION DETECTED";
         }
 
         function resetScreen() {
             isTriggered = false;
             whiteout.style.display = 'none';
-            lastFrame = null; // Reset frame to avoid immediate re-trigger
+            lastFrame = null; // Clear history to prevent instant re-trigger
+            status.innerText = "System: Monitoring for Motion...";
             requestAnimationFrame(detectMotion);
         }
 
+        // Run on startup
         initCamera();
     </script>
 </body>
