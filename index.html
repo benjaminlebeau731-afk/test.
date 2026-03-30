@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motion Privacy Screen</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        video { width: 100vw; height: 100vh; object-fit: cover; }
+        
+        #whiteout {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: white;
+            display: none;
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 40px;
+            cursor: pointer;
+            color: #333;
+            font-weight: bold;
+            border: 2px solid #333;
+            padding: 5px 15px;
+            border-radius: 10px;
+        }
+
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="whiteout">
+        <div id="close-btn" onclick="resetScreen()">X</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const whiteout = document.getElementById('whiteout');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        
+        let lastFrame = null;
+        let isTriggered = false;
+
+        // Start Camera
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                requestAnimationFrame(detectMotion);
+            } catch (err) {
+                alert("Camera access denied or not available.");
+            }
+        }
+
+        function detectMotion() {
+            if (isTriggered) return;
+
+            // Set canvas size to match video
+            canvas.width = video.videoWidth / 4; // Downscale for performance
+            canvas.height = video.videoHeight / 4;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            if (lastFrame) {
+                let diff = 0;
+                for (let i = 0; i < currentFrame.data.length; i += 4) {
+                    // Compare RGB values
+                    const rDiff = Math.abs(currentFrame.data[i] - lastFrame.data[i]);
+                    const gDiff = Math.abs(currentFrame.data[i+1] - lastFrame.data[i+1]);
+                    const bDiff = Math.abs(currentFrame.data[i+2] - lastFrame.data[i+2]);
+                    
+                    if (rDiff + gDiff + bDiff > 100) diff++;
+                }
+
+                // Threshold: If more than 5% of pixels changed
+                if (diff > (canvas.width * canvas.height) * 0.05) {
+                    triggerWhiteout();
+                }
+            }
+
+            lastFrame = currentFrame;
+            requestAnimationFrame(detectMotion);
+        }
+
+        function triggerWhiteout() {
+            isTriggered = true;
+            whiteout.style.display = 'flex';
+        }
+
+        function resetScreen() {
+            isTriggered = false;
+            whiteout.style.display = 'none';
+            lastFrame = null; // Reset frame to avoid immediate re-trigger
+            requestAnimationFrame(detectMotion);
+        }
+
+        initCamera();
+    </script>
+</body>
+</html>
